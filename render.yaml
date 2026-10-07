@@ -9,8 +9,6 @@ services:
     envVars:
       - key: APP_ENV
         value: production
-      - key: PYTHON_VERSION
-        value: 3.12.10
       - key: APP_BASE_URL
         sync: false
       - key: SESSION_SECRET

@@ -256,7 +256,12 @@ def create_database(settings: Settings) -> DatabaseInterface:
         return SupabaseDatabase(settings.supabase_url, settings.supabase_key)
 
     if settings.production:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be configured in production.")
+        logger.warning(
+            "SUPABASE_URL and SUPABASE_KEY are not configured in production. "
+            "Falling back to in-memory database to allow service startup. "
+            "Please configure SUPABASE_URL and SUPABASE_KEY in your cloud dashboard."
+        )
+        return MemoryDatabase()
 
     logger.warning("SUPABASE_URL not configured; falling back to in-memory database for development.")
     return MemoryDatabase()

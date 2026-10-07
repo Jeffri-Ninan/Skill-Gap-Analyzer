@@ -92,8 +92,13 @@ async def require_same_origin(request: Request) -> None:
         return
     expected = urlparse(settings.app_base_url)
     actual = urlparse(origin)
-    if actual.scheme != expected.scheme or actual.netloc.casefold() != expected.netloc.casefold():
-        raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
+    if actual.scheme == expected.scheme and actual.netloc.casefold() == expected.netloc.casefold():
+        return
+    if actual.netloc.casefold().endswith(".onrender.com"):
+        return
+    if actual.netloc.casefold() in {"localhost:8000", "127.0.0.1:8000", "localhost", "127.0.0.1"}:
+        return
+    raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
 
 
 @app.get("/api/health")

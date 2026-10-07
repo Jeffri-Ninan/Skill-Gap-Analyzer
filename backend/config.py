@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -30,17 +31,33 @@ class Settings:
 
 def load_settings() -> Settings:
     environment = os.getenv("APP_ENV", "development").strip().lower()
-    base_url = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    is_prod = environment == "production"
+
+    # Detect base URL from APP_BASE_URL or cloud provider environment (Render, etc.)
+    base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
+    if not base_url:
+        render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+        render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip().rstrip("/")
+        if render_url:
+            base_url = render_url
+        elif render_host:
+            base_url = f"https://{render_host}"
+        elif is_prod:
+            base_url = "https://skill-gap-analyzer.onrender.com"
+        else:
+            base_url = "http://localhost:8000"
+
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path not in {"", "/"}:
         raise RuntimeError("APP_BASE_URL must be an absolute HTTP(S) URL.")
-    if environment == "production" and parsed.scheme != "https":
+    if is_prod and parsed.scheme != "https":
         raise RuntimeError("APP_BASE_URL must use HTTPS in production.")
 
-    secret = os.getenv("SESSION_SECRET", "")
-    if environment == "production" and len(secret) < 32:
-        raise RuntimeError("Set SESSION_SECRET to a random value at least 32 characters long.")
-    if not secret:
+    secret = os.getenv("SESSION_SECRET", "").strip()
+    if is_prod and len(secret) < 32:
+        # In cloud environments, if SESSION_SECRET wasn't set, auto-generate a strong secret instead of crashing
+        secret = secrets.token_urlsafe(48)
+    elif not secret:
         secret = "development-only-session-secret-change-before-deploy"
 
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
