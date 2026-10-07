@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 from dataclasses import dataclass
@@ -30,20 +31,27 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    environment = os.getenv("APP_ENV", "development").strip().lower()
-    is_prod = environment == "production"
+    vercel_env = os.getenv("VERCEL_ENV", "").strip().lower()
+    environment = os.getenv("APP_ENV", "production" if vercel_env == "production" else "development").strip().lower()
+    is_prod = environment == "production" or vercel_env == "production"
 
-    # Detect base URL from APP_BASE_URL or cloud provider environment (Render, etc.)
+    # Detect base URL from APP_BASE_URL or cloud provider environment (Vercel, Render, etc.)
     base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
     if not base_url:
+        vercel_url = (
+            os.getenv("VERCEL_PROJECT_PRODUCTION_URL", "").strip()
+            or os.getenv("VERCEL_URL", "").strip()
+        ).rstrip("/")
         render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
         render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip().rstrip("/")
-        if render_url:
+        if vercel_url:
+            base_url = f"https://{vercel_url}" if not vercel_url.startswith("http") else vercel_url
+        elif render_url:
             base_url = render_url
         elif render_host:
             base_url = f"https://{render_host}"
         elif is_prod:
-            base_url = "https://skill-gap-analyzer.onrender.com"
+            base_url = "https://skill-gap-analyzer.vercel.app"
         else:
             base_url = "http://localhost:8000"
 
@@ -53,19 +61,24 @@ def load_settings() -> Settings:
     if is_prod and parsed.scheme != "https":
         raise RuntimeError("APP_BASE_URL must use HTTPS in production.")
 
-    secret = os.getenv("SESSION_SECRET", "").strip()
-    if is_prod and len(secret) < 32:
-        # In cloud environments, if SESSION_SECRET wasn't set, auto-generate a strong secret instead of crashing
-        secret = secrets.token_urlsafe(48)
-    elif not secret:
-        secret = "development-only-session-secret-change-before-deploy"
-
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
     supabase_key = (
         os.getenv("SUPABASE_KEY", "")
         or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
         or os.getenv("SUPABASE_ANON_KEY", "")
     ).strip()
+
+    secret = os.getenv("SESSION_SECRET", "").strip()
+    if not secret:
+        if supabase_key:
+            # Deterministic strong secret derived from Supabase key so serverless cold starts share the same session secret
+            secret = hashlib.sha256(f"skillgap-session-salt:{supabase_key}".encode()).hexdigest()
+        elif is_prod:
+            secret = secrets.token_urlsafe(48)
+        else:
+            secret = "development-only-session-secret-change-before-deploy"
+    elif is_prod and len(secret) < 32:
+        secret = hashlib.sha256(secret.encode()).hexdigest()
 
     return Settings(
         supabase_url=supabase_url,

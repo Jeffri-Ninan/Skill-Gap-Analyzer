@@ -96,6 +96,8 @@ async def require_same_origin(request: Request) -> None:
         return
     if actual.netloc.casefold().endswith(".onrender.com"):
         return
+    if actual.netloc.casefold().endswith(".vercel.app"):
+        return
     if actual.netloc.casefold() in {"localhost:8000", "127.0.0.1:8000", "localhost", "127.0.0.1"}:
         return
     raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
