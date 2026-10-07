@@ -1,20 +1,40 @@
 import {initializeRouter} from "./router.js";
 import {SKILLS,ROLE_TEMPLATES,SAMPLE_JDS} from "./skills-data.js";
-import {loadState,saveState,exportState,parseImport,clearState} from "./storage.js";
+import {loadState,saveState,exportState,parseImport,clearState,getLegacyState} from "./storage.js";
+import {apiRequest} from "./api.js";
 import {extractSkills} from "./extractor.js";
 import {analyze,projectedScore,radarValues,frequencyAcrossAnalyses} from "./analyzer.js";
 import {renderRing,renderRadar,renderTrend} from "./radar.js";
 
 const app=document.querySelector("#app");
-let state=loadState(),currentRoute="",currentAnalysisId=null,whatIf=new Set(),suggestionIndex=-1;
+let state={profile:[],analyses:[],plan:[],settings:{theme:"dark"}},currentUser=null,currentRoute="",currentAnalysisId=null,whatIf=new Set(),suggestionIndex=-1,authMode="login",legacyState=null;
 const $=(selector,root=document)=>root.querySelector(selector);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const pretty=value=>value.replace(/\b\w/g,char=>char.toUpperCase());
 const notify=message=>{const region=$("#toast-region"),toast=document.createElement("div");toast.className="toast";toast.textContent=message;region.append(toast);setTimeout(()=>toast.remove(),3200);};
-const persist=message=>{state=saveState(state);if(message)notify(message);};
-const profileMap=()=>new Map(state.profile.map(item=>[item.skill,item]));
+async function persist(message) {
+  try {
+    state=await saveState(state);
+    applyTheme();
+    if(message)notify(message);
+    return true;
+  } catch(error) {
+    console.error("Save state error:", error);
+    notify(error instanceof Error?error.message:"Your changes could not be saved to the database.");
+    return false;
+  }
+}
+
+function renderAuth(message="") {
+  currentRoute="auth";currentUser=null;state={profile:[],analyses:[],plan:[],settings:{theme:"dark"}};showAccount();applyTheme();
+  app.innerHTML=`<section class="auth-layout"><div class="auth-intro"><div class="eyebrow">Your career, with a plan</div><h1>Understand your fit.<br><span class="brand-accent">Build what’s next.</span></h1><p class="lede">Compare your skills with real job descriptions and focus your learning on the gaps that matter.</p><div class="auth-points"><p>✓ Private profile, saved to your account</p><p>✓ Readiness insights and prioritized learning</p><p>✓ Sign in securely with email or GitHub</p></div></div><section class="card auth-card"><div class="eyebrow">Skill Gap Analyzer</div><h2>${authMode==="login"?"Welcome back":"Create your account"}</h2><p class="muted">${authMode==="login"?"Sign in to access your private profile and analyses.":"Your data is private to your account."}</p><form id="auth-form"><div class="field"><label for="auth-email">Email</label><input id="auth-email" name="email" type="email" autocomplete="email" maxlength="254" required></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" name="password" type="password" autocomplete="${authMode==="login"?"current-password":"new-password"}" minlength="8" maxlength="128" required><span class="hint">${authMode==="register"?"Use at least 8 characters.":""}</span></div><div class="error" id="auth-error" role="alert">${esc(message)}</div><button class="button primary auth-submit" type="submit">${authMode==="login"?"Sign in":"Create account"}</button></form><div class="auth-divider"><span>or</span></div><a class="button github-button" href="/api/auth/github">Continue with GitHub</a><p class="auth-switch">${authMode==="login"?"New to Skill Gap Analyzer?":"Already have an account?"} <button type="button" class="text-button" data-auth-mode="${authMode==="login"?"register":"login"}">${authMode==="login"?"Create an account":"Sign in"}</button></p><p class="hint">By continuing, your profile and job analyses will be saved privately to your account.</p></section></section>`;
+  app.focus({preventScroll:true});
+  apiRequest("/auth/github/status").then(result=>{const link=$(".github-button");if(link)link.hidden=!result.enabled;}).catch(()=>{const link=$(".github-button");if(link)link.hidden=true;});
+}
 const selectedAnalysis=()=>state.analyses.find(item=>item.id===currentAnalysisId)??state.analyses[state.analyses.length-1]??null;
 const daysFromNow=days=>{const date=new Date();date.setDate(date.getDate()+days);return date.toISOString().slice(0,10);};
+const applyTheme=()=>{document.documentElement.dataset.theme=state.settings.theme;$("#theme-toggle").textContent=state.settings.theme==="dark"?"☼":"☾";$("#theme-toggle").setAttribute("aria-label",`Switch to ${state.settings.theme==="dark"?"light":"dark"} theme`);};
+const showAccount=()=>{document.querySelector(".main-nav").hidden=!currentUser;$("#account-controls").hidden=!currentUser;$("#theme-toggle").hidden=!currentUser;$("#account-email").textContent=currentUser?.email??"";};
 
 function pageHead(eyebrow,title,description,actions="") {
   return `<div class="page-heading"><div class="heading-copy"><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p class="lede">${description}</p></div>${actions?`<div class="button-row">${actions}</div>`:""}</div>`;
@@ -25,7 +45,10 @@ function emptyState(title,copy,href,label) {
 function renderProfile() {
   const rows=state.profile.length?state.profile.map(item=>`<div class="skill-row" data-skill="${esc(item.skill)}"><strong>${esc(pretty(item.skill))}<span class="muted"> · ${esc(SKILLS[item.skill]?.category??"Other")}</span></strong><label class="hint">Level <select aria-label="${esc(item.skill)} proficiency level" data-profile-level="${esc(item.skill)}">${[1,2,3,4,5].map(level=>`<option value="${level}"${level===item.level?" selected":""}>${level} / 5</option>`).join("")}</select></label><label class="hint">Years <input aria-label="${esc(item.skill)} years of experience" type="number" min="0" max="60" step=".5" value="${item.years}" data-profile-years="${esc(item.skill)}"></label><button class="button small danger" type="button" data-remove-skill="${esc(item.skill)}" aria-label="Remove ${esc(item.skill)}">Remove</button></div>`).join(""):emptyState("Your profile is ready to grow","Add skills below or choose a role template to start with realistic sample experience.","#/analyze","Continue to analysis");
   const templateCards=Object.entries(ROLE_TEMPLATES).map(([title,items])=>`<button class="card template-card" type="button" data-template="${esc(title)}"><span class="eyebrow">Role template</span><h3>${esc(title)}</h3><p>${items.length} starter skills · click to load this sample profile</p></button>`).join("");
-  return `${pageHead("Your foundation","Build your skill profile","Add the skills you use, then compare your experience against a role. Your profile stays on this device.","<button class=\"button\" data-action=\"export\">Export JSON</button> <button class=\"button\" data-action=\"import\">Import JSON</button>")}
+  const hasAccountData=state.profile.length||state.analyses.length||state.plan.length;
+  const migration=legacyState&&!hasAccountData?`<section class="card migration-card"><h2>Import your previous browser data?</h2><p class="muted">We found a profile saved by the earlier version of this app on this device. It will only be copied into your account if you choose to import it.</p><button class="button" data-action="migrate-legacy">Import previous data</button></section>`:"";
+  return `${pageHead("Your foundation","Build your skill profile","Add the skills you use, then compare your experience against a role. Your profile is saved privately to your account.","<button class=\"button\" data-action=\"export\">Export JSON</button> <button class=\"button\" data-action=\"import\">Import JSON</button>")}
+  ${migration}
   <section class="card"><h2>Add a skill</h2><p class="muted">Search our skill dictionary. Duplicate skills are prevented.</p>
     <form id="add-skill-form" class="inline-form" autocomplete="off">
       <div class="field autocomplete"><label for="skill-entry">Skill</label><input id="skill-entry" name="skill" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="skill-suggestions" placeholder="Try React, SQL, or communication" required><div class="suggestions" id="skill-suggestions" role="listbox" hidden></div></div>
@@ -105,11 +128,12 @@ function updateTrend() {
   const svg=renderTrend(state.analyses.filter(item=>(item.jobTitle||"Untitled role")===title));
   const container=$("#trend-chart");container.replaceChildren(svg);
 }
-function addProfileSkill(skill,level=3,years=0) {
+async function addProfileSkill(skill,level=3,years=0) {
   if(!SKILLS[skill])return notify("Choose a skill from the suggestions.");
   if(state.profile.some(item=>item.skill===skill))return notify(`${pretty(skill)} is already in your profile.`);
   state.profile.push({skill,level:Number(level),years:Number(years)});
-  state.profile.sort((a,b)=>a.skill.localeCompare(b.skill));persist(`${pretty(skill)} added to your profile.`);render("profile");
+  state.profile.sort((a,b)=>a.skill.localeCompare(b.skill));
+  if(await persist(`${pretty(skill)} added to your profile.`))render("profile");
 }
 function showSuggestions() {
   const input=$("#skill-entry"),list=$("#skill-suggestions");if(!input||!list)return;
@@ -119,16 +143,31 @@ function showSuggestions() {
   list.hidden=!matches.length;input.setAttribute("aria-expanded",String(matches.length>0));
   if(suggestionIndex>=matches.length)suggestionIndex=-1;
 }
-function analyzeDraft() {
+async function analyzeDraft() {
   const error=$("#analysis-error"),text=$("#jd-text").value.trim(),title=$("#job-title").value.trim(),company=$("#company").value.trim();
   if(state.profile.length===0){error.textContent="Add at least one skill to your profile before analyzing a role.";return;}
   if(text.length<30){error.textContent="Add a little more detail (at least 30 characters), ideally including a requirements section.";return;}
   if(text.length>50000){error.textContent="This description is too long. Keep it under 50,000 characters.";return;}
   const extraction=extractSkills(text,title);
-  if(!extraction.hasSkills){const record={id:crypto.randomUUID(),date:new Date().toISOString(),jobTitle:title,company,score:null,matched:[],partial:[],gaps:[],jdText:text,extracted:[],profileSnapshot:structuredClone(state.profile)};state.analyses.push(record);state.draft={jdText:text,jobTitle:title,company};currentAnalysisId=record.id;persist();location.hash="#/results";return;}
+  if(!extraction.hasSkills){
+    const record={id:crypto.randomUUID(),date:new Date().toISOString(),jobTitle:title,company,score:null,matched:[],partial:[],gaps:[],jdText:text,extracted:[],profileSnapshot:structuredClone(state.profile)};
+    state.analyses.push(record);
+    state.draft={jdText:text,jobTitle:title,company};
+    currentAnalysisId=record.id;
+    await persist();
+    location.hash="#/results";
+    render("results");
+    return;
+  }
   const computed=analyze(extraction.skills,state.profile);
   const record={id:crypto.randomUUID(),date:new Date().toISOString(),jobTitle:title,company,score:computed.score,matched:computed.matched.map(item=>item.skill),partial:computed.partial.map(item=>item.skill),gaps:computed.gaps.map(item=>({skill:item.skill,weight:item.weight})),jdText:text,extracted:extraction.skills,profileSnapshot:structuredClone(state.profile)};
-  state.analyses.push(record);state.draft={jdText:text,jobTitle:title,company};whatIf.clear();currentAnalysisId=record.id;persist("Analysis saved.");location.hash="#/results";
+  state.analyses.push(record);
+  state.draft={jdText:text,jobTitle:title,company};
+  whatIf.clear();
+  currentAnalysisId=record.id;
+  await persist("Analysis saved.");
+  location.hash="#/results";
+  render("results");
 }
 function loadSample(index) {
   const sample=SAMPLE_JDS[index];$("#job-title").value=sample.title;$("#company").value=sample.company;$("#jd-text").value=sample.text;
@@ -141,30 +180,43 @@ function compareSelected() {
   const selected=state.analyses.filter(item=>ids.includes(item.id)),frequent=frequencyAcrossAnalyses(selected);
   $("#comparison-results").innerHTML=`<div class="section-gap"><h3>Most common gaps across ${selected.length} roles</h3>${frequent.length?`<ol>${frequent.map(item=>`<li>${esc(pretty(item.skill))} <span class="pill">${item.count} ${item.count===1?"role":"roles"}</span> <span class="muted">${esc(item.category)}</span></li>`).join("")}</ol>`:`<p class="muted">These roles have no saved skill gaps in common.</p>`}</div>`;
 }
-function handleClick(event) {
+async function handleClick(event) {
   const target=event.target.closest("button");if(!target)return;
+  if(target.dataset.authMode){authMode=target.dataset.authMode;renderAuth();$("#auth-email")?.focus();return;}
   if(target.dataset.suggest){$("#skill-entry").value=target.dataset.suggest;$("#skill-suggestions").hidden=true;$("#skill-entry").setAttribute("aria-expanded","false");suggestionIndex=-1;return;}
-  if(target.dataset.removeSkill){state.profile=state.profile.filter(item=>item.skill!==target.dataset.removeSkill);persist("Skill removed.");render("profile");return;}
-  if(target.dataset.template){const title=target.dataset.template;if(state.profile.length&&!confirm("Replace your current profile with this role template?"))return;state.profile=ROLE_TEMPLATES[title].map(([skill,level,years])=>({skill,level,years}));persist(`${title} profile loaded.`);render("profile");return;}
+  if(target.dataset.removeSkill){state.profile=state.profile.filter(item=>item.skill!==target.dataset.removeSkill);if(await persist("Skill removed."))render("profile");return;}
+  if(target.dataset.template){const title=target.dataset.template;if(state.profile.length&&!confirm("Replace your current profile with this role template?"))return;state.profile=ROLE_TEMPLATES[title].map(([skill,level,years])=>({skill,level,years}));if(await persist(`${title} profile loaded.`))render("profile");return;}
   if(target.dataset.sample!==undefined){loadSample(Number(target.dataset.sample));return;}
-  if(target.dataset.action==="analyze"){analyzeDraft();return;}
+  if(target.dataset.action==="analyze"){await analyzeDraft();return;}
   if(target.dataset.action==="export"){exportState(state);return;}
-  if(target.dataset.action==="import"){const picker=document.createElement("input");picker.type="file";picker.accept="application/json,.json";picker.addEventListener("change",async()=>{const file=picker.files?.[0];if(!file)return;try{const imported=parseImport(await file.text());state=saveState(imported);currentAnalysisId=null;persist("Data imported successfully.");render(currentRoute);}catch(error){notify(error instanceof Error?error.message:"Unable to import this file.");}});picker.click();return;}
-  if(target.dataset.action==="reset"){if(confirm("Reset your profile, analyses, learning plan, and theme? This cannot be undone.")){clearState();state=loadState();currentAnalysisId=null;location.hash="#/profile";render("profile");notify("All data reset.");}return;}
+  if(target.dataset.action==="import"){const picker=document.createElement("input");picker.type="file";picker.accept="application/json,.json";picker.addEventListener("change",async()=>{const file=picker.files?.[0];if(!file)return;try{const imported=parseImport(await file.text());const previous=state;state=imported;if(await persist("Data imported successfully.")){currentAnalysisId=null;legacyState=null;render(currentRoute);}else{state=previous;}}catch(error){notify(error instanceof Error?error.message:"Unable to import this file.");}});picker.click();return;}
+  if(target.dataset.action==="migrate-legacy"){if(!legacyState)return;if(!confirm("Copy the data from this browser into your signed-in account? This replaces the current account data."))return;const previous=state;state=legacyState;if(await persist("Previous browser data imported into your account.")){legacyState=null;try{localStorage.removeItem("skill-gap-analyzer:v1");}catch(error){console.warn("The old browser copy could not be removed.",error);}render("profile");}else state=previous;return;}
+  if(target.dataset.action==="reset"){if(confirm("Reset your profile, analyses, and learning plan? This cannot be undone.")){await clearState();state={profile:[],analyses:[],plan:[],settings:{theme:"dark"}};currentAnalysisId=null;legacyState=null;applyTheme();render("profile");notify("All account data reset.");}return;}
   if(target.dataset.action==="parse-resume"){const result=extractSkills($("#resume-text").value);const container=$("#resume-suggestions");if(!result.hasSkills){container.textContent="No supported skills found. Add more detail to the resume text.";return;}container.innerHTML=result.skills.filter(item=>!state.profile.some(skill=>skill.skill===item.skill)).map(item=>`<button type="button" class="button small" data-resume-skill="${esc(item.skill)}">+ ${esc(pretty(item.skill))} · Add at level 3</button>`).join("")||"<span class=\"muted\">Every detected skill is already in your profile.</span>";return;}
-  if(target.dataset.resumeSkill){addProfileSkill(target.dataset.resumeSkill,3,0);return;}
-  if(target.dataset.addPlan){const skill=target.dataset.addPlan;if(!state.plan.some(item=>item.skill===skill)){state.plan.push({skill,done:false,targetDate:daysFromNow(30)});persist(`${pretty(skill)} added to your plan.`);render("results");}else notify(`${pretty(skill)} is already in your plan.`);return;}
+  if(target.dataset.resumeSkill){await addProfileSkill(target.dataset.resumeSkill,3,0);return;}
+  if(target.dataset.addPlan){const skill=target.dataset.addPlan;if(!state.plan.some(item=>item.skill===skill)){state.plan.push({skill,done:false,targetDate:daysFromNow(30)});if(await persist(`${pretty(skill)} added to your plan.`))render("results");}else notify(`${pretty(skill)} is already in your plan.`);return;}
   if(target.dataset.openAnalysis){currentAnalysisId=target.dataset.openAnalysis;whatIf.clear();location.hash="#/results";return;}
-  if(target.dataset.deleteAnalysis){if(confirm("Delete this analysis from history?")){state.analyses=state.analyses.filter(item=>item.id!==target.dataset.deleteAnalysis);persist("Analysis deleted.");render("history");}return;}
+  if(target.dataset.deleteAnalysis){if(confirm("Delete this analysis from history?")){state.analyses=state.analyses.filter(item=>item.id!==target.dataset.deleteAnalysis);if(await persist("Analysis deleted."))render("history");}return;}
   if(target.dataset.action==="compare"){compareSelected();}
 }
-app.addEventListener("click",handleClick);
-app.addEventListener("submit",event=>{
+app.addEventListener("click",event=>{handleClick(event).catch(error=>notify(error instanceof Error?error.message:"The request could not be completed."));});
+app.addEventListener("submit",async event=>{
+  event.preventDefault();
+  if(event.target.id==="auth-form") {
+    const form=event.target,submit=$(".auth-submit",form),error=$("#auth-error");
+    submit.disabled=true;error.textContent="";
+    try {
+      const values=new FormData(form),path=authMode==="login"?"/auth/login":"/auth/register";
+      currentUser=await apiRequest(path,{method:"POST",body:JSON.stringify({email:values.get("email"),password:values.get("password")})});
+      state=await loadState();legacyState=getLegacyState();currentAnalysisId=null;whatIf.clear();showAccount();applyTheme();render("profile");history.replaceState(null,"",`${location.pathname}${location.search}#/profile`);
+    } catch(failure) {error.textContent=failure instanceof Error?failure.message:"Unable to sign in.";submit.disabled=false;}
+    return;
+  }
   if(event.target.id!=="add-skill-form")return;
-  event.preventDefault();const data=new FormData(event.target),raw=String(data.get("skill")).trim().toLowerCase();
+  const data=new FormData(event.target),raw=String(data.get("skill")).trim().toLowerCase();
   const skill=Object.keys(SKILLS).find(name=>name===raw||SKILLS[name].aliases.includes(raw));
-  if(!skill){notify("Select a skill from the autocomplete suggestions.");return;}
-  addProfileSkill(skill,data.get("level"),data.get("years"));
+  if(!skill){notify("Select a skill from the suggestions.");return;}
+  await addProfileSkill(skill,data.get("level"),data.get("years"));
 });
 app.addEventListener("input",event=>{
   if(event.target.id==="skill-entry"){suggestionIndex=-1;showSuggestions();}
@@ -180,20 +232,38 @@ app.addEventListener("keydown",event=>{
   else if(event.key==="Enter"&&suggestionIndex>=0){event.preventDefault();options[suggestionIndex].click();}
   else if(event.key==="Escape"){$("#skill-suggestions").hidden=true;event.target.setAttribute("aria-expanded","false");}
 });
-app.addEventListener("change",event=>{
+app.addEventListener("change",async event=>{
   const target=event.target;
-  if(target.dataset.profileLevel){const item=state.profile.find(skill=>skill.skill===target.dataset.profileLevel);if(item){item.level=Number(target.value);persist();}}
-  if(target.dataset.profileYears){const item=state.profile.find(skill=>skill.skill===target.dataset.profileYears);if(item){const years=Number(target.value);if(Number.isFinite(years)&&years>=0&&years<=60){item.years=years;persist();}else{target.value=String(item.years);notify("Years of experience must be between 0 and 60.");}}}
+  if(target.dataset.profileLevel){const item=state.profile.find(skill=>skill.skill===target.dataset.profileLevel);if(item){item.level=Number(target.value);await persist();}}
+  if(target.dataset.profileYears){const item=state.profile.find(skill=>skill.skill===target.dataset.profileYears);if(item){const years=Number(target.value);if(Number.isFinite(years)&&years>=0&&years<=60){item.years=years;await persist();}else{target.value=String(item.years);notify("Years of experience must be between 0 and 60.");}}}
   if(target.dataset.whatif){if(target.checked)whatIf.add(target.dataset.whatif);else whatIf.delete(target.dataset.whatif);render("results");}
-  if(target.dataset.planDone){const item=state.plan.find(skill=>skill.skill===target.dataset.planDone);if(item){item.done=target.checked;persist("Plan progress saved.");render("plan");}}
-  if(target.dataset.planDate){const item=state.plan.find(skill=>skill.skill===target.dataset.planDate);if(item){item.targetDate=target.value;persist("Target date saved.");}}
+  if(target.dataset.planDone){const item=state.plan.find(skill=>skill.skill===target.dataset.planDone);if(item){item.done=target.checked;if(await persist("Plan progress saved."))render("plan");}}
+  if(target.dataset.planDate){const item=state.plan.find(skill=>skill.skill===target.dataset.planDate);if(item){item.targetDate=target.value;await persist("Target date saved.");}}
   if(target.id==="trend-title")updateTrend();
 });
-document.querySelector("#theme-toggle").addEventListener("click",()=>{
-  state.settings.theme=state.settings.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=state.settings.theme;persist("Theme preference saved.");
-  $("#theme-toggle").textContent=state.settings.theme==="dark"?"☼":"☾";$("#theme-toggle").setAttribute("aria-label",`Switch to ${state.settings.theme==="dark"?"light":"dark"} theme`);
+document.querySelector("#theme-toggle").addEventListener("click",async()=>{
+  state.settings.theme=state.settings.theme==="dark"?"light":"dark";await persist("Theme preference saved.");
 });
-document.documentElement.dataset.theme=state.settings.theme;
-$("#theme-toggle").textContent=state.settings.theme==="dark"?"☼":"☾";
-$("#theme-toggle").setAttribute("aria-label",`Switch to ${state.settings.theme==="dark"?"light":"dark"} theme`);
-initializeRouter(render,()=>state.profile.length>0);
+$("#signout-button").addEventListener("click",async()=>{
+  try { await apiRequest("/auth/logout",{method:"POST"});currentUser=null;legacyState=null;currentAnalysisId=null;whatIf.clear();authMode="login";showAccount();renderAuth("You have signed out."); }
+  catch(error) {notify(error instanceof Error?error.message:"Unable to sign out.");}
+});
+window.addEventListener("skillgap:unauthorized",()=>{currentUser=null;legacyState=null;currentAnalysisId=null;whatIf.clear();authMode="login";renderAuth("Your session expired. Please sign in again.");});
+let authReady=false;
+initializeRouter(route=>{if(currentUser)render(route);else if(authReady)renderAuth();},()=>state.profile.length>0);
+async function bootstrap() {
+  try {
+    currentUser=await apiRequest("/auth/me");
+    state=await loadState();
+    legacyState=getLegacyState();
+    showAccount();applyTheme();render(location.hash==="#/analyze"?"analyze":location.hash==="#/results"?"results":location.hash==="#/history"?"history":location.hash==="#/plan"?"plan":"profile");
+  } catch(error) {
+    if(error.status===401)renderAuth();
+    else {
+      showAccount();
+      app.innerHTML=`<section class="card service-error"><div class="eyebrow">Connection problem</div><h1>We couldn’t reach the Skill Gap Analyzer server</h1><p class="lede">${esc(error.message)}</p><button class="button primary" data-action="retry">Try again</button></section>`;
+    }
+  } finally {authReady=true;}
+}
+app.addEventListener("click",event=>{if(event.target.closest("[data-action='retry']"))bootstrap();});
+bootstrap();
