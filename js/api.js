@@ -13,7 +13,19 @@ export async function apiRequest(path,options={}) {
   }
   if(response.status===204)return null;
   const contentType=response.headers.get("content-type")??"";
-  const body=contentType.includes("application/json")?await response.json():null;
+  if(!contentType.includes("application/json")) {
+    const error=new Error("The backend API could not be reached. Ensure your Python backend server is running.");
+    error.status=response.status;
+    throw error;
+  }
+  let body=null;
+  try {
+    body=await response.json();
+  } catch(e) {
+    const error=new Error("Invalid API response format from server.");
+    error.status=response.status;
+    throw error;
+  }
   if(!response.ok) {
     const detail=body?.detail;
     if(response.status===401&&!["/auth/login","/auth/register","/auth/me"].includes(path)) {

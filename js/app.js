@@ -254,16 +254,24 @@ initializeRouter(route=>{if(currentUser)render(route);else if(authReady)renderAu
 async function bootstrap() {
   try {
     currentUser=await apiRequest("/auth/me");
+  } catch(error) {
+    if(error.status===401) {
+      currentUser=null;
+      renderAuth();
+      return;
+    }
+    showAccount();
+    app.innerHTML=`<section class="card service-error"><div class="eyebrow">Connection problem</div><h1>We couldn’t reach the Skill Gap Analyzer server</h1><p class="lede">${esc(error.message)}</p><button class="button primary" data-action="retry">Try again</button></section>`;
+    return;
+  } finally {authReady=true;}
+  try {
     state=await loadState();
     legacyState=getLegacyState();
     showAccount();applyTheme();render(location.hash==="#/analyze"?"analyze":location.hash==="#/results"?"results":location.hash==="#/history"?"history":location.hash==="#/plan"?"plan":"profile");
   } catch(error) {
-    if(error.status===401)renderAuth();
-    else {
-      showAccount();
-      app.innerHTML=`<section class="card service-error"><div class="eyebrow">Connection problem</div><h1>We couldn’t reach the Skill Gap Analyzer server</h1><p class="lede">${esc(error.message)}</p><button class="button primary" data-action="retry">Try again</button></section>`;
-    }
-  } finally {authReady=true;}
+    showAccount();
+    app.innerHTML=`<section class="card service-error"><div class="eyebrow">Data error</div><h1>Unable to load your saved data</h1><p class="lede">${esc(error.message)}</p><button class="button primary" data-action="retry">Try again</button></section>`;
+  }
 }
 app.addEventListener("click",event=>{if(event.target.closest("[data-action='retry']"))bootstrap();});
 bootstrap();

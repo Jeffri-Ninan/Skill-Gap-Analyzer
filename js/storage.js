@@ -2,12 +2,13 @@ import {apiRequest} from "./api.js";
 
 export async function loadState() {
   const result=await apiRequest("/data");
+  const data = (result && typeof result === "object" && result.data) ? result.data : {};
   return {
-    profile: result.data.profile ?? [],
-    analyses: result.data.analyses ?? [],
-    plan: result.data.plan ?? [],
-    settings: result.data.settings ?? {theme: "dark"},
-    draft: result.data.draft ?? null
+    profile: data.profile ?? [],
+    analyses: data.analyses ?? [],
+    plan: data.plan ?? [],
+    settings: data.settings ?? {theme: "dark"},
+    draft: data.draft ?? null
   };
 }
 
