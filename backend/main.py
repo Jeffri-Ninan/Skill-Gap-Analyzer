@@ -47,11 +47,18 @@ frontend_directory = Path(__file__).resolve().parent.parent
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if hasattr(db, "initialize"):
-        await db.initialize()
-    await db.ping()
+    try:
+        if hasattr(db, "initialize"):
+            await db.initialize()
+        await db.ping()
+    except Exception as exc:
+        import logging
+        logging.getLogger("skillgap").warning("Startup database check warning: %s", exc)
     yield
-    await db.close()
+    try:
+        await db.close()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Skill Gap Analyzer API", version="1.0.0", lifespan=lifespan)
@@ -288,4 +295,4 @@ class FrontendFiles(StaticFiles):
         return await super().get_response(path, scope)
 
 
-app.mount("/", FrontendFiles(directory=frontend_directory, html=True), name="frontend")
+app.mount("/", FrontendFiles(directory=frontend_directory, html=True, check_dir=False), name="frontend")

@@ -4,4 +4,4 @@ httpx>=0.27,<1
 pwdlib[argon2]>=0.2,<1
 python-dotenv>=1,<2
 supabase>=2.30,<3
-uvicorn[standard]>=0.30,<1
+uvicorn>=0.30,<1
