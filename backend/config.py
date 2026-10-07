@@ -31,27 +31,28 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    render_env = os.getenv("RENDER", "").strip().lower() == "true"
     vercel_env = os.getenv("VERCEL_ENV", "").strip().lower()
-    environment = os.getenv("APP_ENV", "production" if vercel_env == "production" else "development").strip().lower()
-    is_prod = environment == "production" or vercel_env == "production"
+    environment = os.getenv("APP_ENV", "production" if (render_env or vercel_env == "production") else "development").strip().lower()
+    is_prod = environment == "production" or render_env or vercel_env == "production"
 
-    # Detect base URL from APP_BASE_URL or cloud provider environment (Vercel, Render, etc.)
+    # Detect base URL from APP_BASE_URL or cloud provider environment (Render, Vercel, etc.)
     base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
     if not base_url:
+        render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+        render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip().rstrip("/")
         vercel_url = (
             os.getenv("VERCEL_PROJECT_PRODUCTION_URL", "").strip()
             or os.getenv("VERCEL_URL", "").strip()
         ).rstrip("/")
-        render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-        render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip().rstrip("/")
-        if vercel_url:
-            base_url = f"https://{vercel_url}" if not vercel_url.startswith("http") else vercel_url
-        elif render_url:
+        if render_url:
             base_url = render_url
         elif render_host:
             base_url = f"https://{render_host}"
+        elif vercel_url:
+            base_url = f"https://{vercel_url}" if not vercel_url.startswith("http") else vercel_url
         elif is_prod:
-            base_url = "https://skill-gap-analyzer.vercel.app"
+            base_url = "https://skill-gap-analyzer.onrender.com"
         else:
             base_url = "http://localhost:8000"
 
