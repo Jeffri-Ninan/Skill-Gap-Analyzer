@@ -11,7 +11,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://skill-gap-analyzer.onrender.com/api/:splat"
+  to = "https://skill-gap-analyzer-1-0icd.onrender.com/api/:splat"
   status = 200
   force = true
 
