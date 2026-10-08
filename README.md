@@ -11,7 +11,8 @@ Users can register with email and password or sign in with GitHub OAuth. Each us
 - **Frontend**: Vanilla HTML5, CSS3, and modern JavaScript (ES Modules). Single-page application with responsive radar charts, skill extraction engine, what-if simulators, and career plan trackers.
 - **Backend**: Python 3.11+ with **FastAPI**, Starlette sessions, Argon2 password hashing via `pwdlib`, and GitHub OAuth integration via `Authlib`.
 - **Database**: **Supabase PostgreSQL** accessed via the official async `supabase` Python client (`postgrest`), configured with Row Level Security (RLS) and schema validation.
-- **Deployment**: Ready for **Render** (via `render.yaml` Blueprint) and **Supabase**.
+- **AI guidance**: Optional, authenticated career recommendations generated with the **Gemini API**. The API key stays on the backend.
+- **Deployment**: **Netlify** serves the static frontend and proxies `/api/*` requests to the **Render** FastAPI backend; **Supabase** stores account data.
 
 ---
 
@@ -67,9 +68,12 @@ APP_BASE_URL=http://localhost:8000
 SESSION_SECRET=<paste_your_generated_secret_here>
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_KEY=your-supabase-service-role-or-anon-key
+GEMINI_API_KEY=<your_google_ai_studio_api_key>
 ```
 
 > **Note for Local Testing**: If `SUPABASE_URL` is not set, the backend automatically falls back to an in-memory database adapter for local development and testing.
+
+To enable AI career guidance, create a key in [Google AI Studio](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY` in `.env`. `GEMINI_MODEL` defaults to `gemini-2.5-flash` and can be overridden if that model is unavailable to your account. The browser never receives the key. When a user requests guidance, the backend sends Gemini the role title, readiness score, detected skill groups, and skill levels/years; it does **not** send the full job description, account email, or account ID. Google's free-tier terms state prompts may be used to improve Google products; review the [Gemini API terms](https://ai.google.dev/gemini-api/terms) before enabling it. Free-tier availability and quotas can change.
 
 ### 5. Start the Server
 
@@ -100,19 +104,20 @@ To enable GitHub sign-in:
 
 ---
 
-## Deploy to Render & Supabase
+## Deploy to Netlify, Render & Supabase
 
-1. Push your repository to GitHub.
-2. Ensure your Supabase database schema is executed using `supabase_schema.sql`.
-3. In **Render** (<https://render.com>):
-   - Click **New** → **Blueprint** and connect your repository.
-   - Render detects `render.yaml` automatically.
-4. In the Render Dashboard environment settings for your service:
-   - Set `APP_BASE_URL` to your Render production URL (e.g., `https://skill-gap-analyzer.onrender.com`).
-   - Set `SUPABASE_URL` to your Supabase project URL.
-   - Set `SUPABASE_KEY` to your Supabase service role key.
-   - Optionally add `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
-5. Trigger deploy. Render will build and launch your full-stack application!
+1. Push the repository to GitHub and run [`supabase_schema.sql`](supabase_schema.sql) in your Supabase SQL Editor.
+2. In **Netlify** (<https://netlify.com>), import the repository. Netlify reads `netlify.toml`, copies only `index.html`, `styles.css`, and `js/` into the published `dist/` folder, and routes `/api/*` through to the backend. This keeps `.env` and Python source files out of the published site.
+3. In **Render** (<https://render.com>), create a Blueprint from the same repository. Render detects `render.yaml` and deploys the FastAPI backend.
+4. In the Render service environment settings, set:
+   - `APP_BASE_URL` to your Netlify site's primary HTTPS URL (for example, `https://your-site.netlify.app`).
+   - `SUPABASE_URL` and `SUPABASE_KEY` to your Supabase project settings.
+   - `GEMINI_API_KEY` to your Google AI Studio key to enable AI guidance.
+   - Optionally, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+5. The proxy target in [`netlify.toml`](netlify.toml) defaults to `https://skill-gap-analyzer.onrender.com`, matching this repository's Render service name. If Render assigns your service another hostname, update the `/api/*` redirect target in that file and redeploy Netlify.
+6. For GitHub sign-in, set the OAuth app callback URL to `https://your-site.netlify.app/api/auth/github/callback`. Redeploy the Render backend after setting `APP_BASE_URL` and any secrets.
+
+Netlify hosts the frontend; it does not run this Python/FastAPI backend. The API remains on Render, and Netlify's same-origin proxy preserves the app's session-cookie flow. For local development, the existing FastAPI server continues to serve both the frontend and API directly.
 
 ---
 
@@ -135,5 +140,6 @@ python -m unittest discover -s backend/tests -v
 - **End-to-End Full Stack**: Python FastAPI serving API and static frontend seamlessly with zero CORS issues.
 - **Supabase PostgreSQL Persistence**: Scalable relational database storage with foreign key constraints, indexes, and RLS.
 - **Robust Security**: Argon2 password hashing, HttpOnly session cookies, Lax same-site policies, and CSRF / origin validation on mutating requests.
+- **Optional Gemini Career Guidance**: Generates a practical skills summary and first-week plan from the role and profile summary, without sending the full job description or account identifiers.
 - **Interactive Skill Gap Engine**: 75+ skill taxonomy, job description parsing, readiness score calculation, radar visualization, what-if simulators, and personalized learning roadmap.
 - **Local-to-Cloud Migration**: Detects previous offline browser localStorage data and allows one-click migration to the user's Supabase account upon signup.

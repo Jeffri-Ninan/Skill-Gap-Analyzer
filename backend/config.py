@@ -13,6 +13,8 @@ class Settings:
     supabase_key: str
     session_secret: str
     app_base_url: str
+    gemini_api_key: str | None
+    gemini_model: str
     github_client_id: str | None
     github_client_secret: str | None
     environment: str
@@ -86,6 +88,8 @@ def load_settings() -> Settings:
         supabase_key=supabase_key,
         session_secret=secret,
         app_base_url=base_url,
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip() or None,
+        gemini_model=os.getenv("GEMINI_MODEL", "").strip() or "gemini-2.5-flash",
         github_client_id=os.getenv("GITHUB_CLIENT_ID"),
         github_client_secret=os.getenv("GITHUB_CLIENT_SECRET"),
         environment=environment,

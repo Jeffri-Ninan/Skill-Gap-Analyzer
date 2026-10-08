@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from backend.config import load_settings
-from backend.models import AppData, Credentials
+from backend.models import AppData, Credentials, InsightsRequest
 from backend.security import hash_password, normalize_email, verify_password
 
 
@@ -105,6 +105,16 @@ class AppDataTests(unittest.TestCase):
         payload["analyses"][0]["jdText"] = "x" * 50_001
         with self.assertRaises(ValidationError):
             AppData.model_validate(payload)
+
+
+class InsightsRequestTests(unittest.TestCase):
+    def test_ai_request_does_not_accept_full_job_descriptions(self) -> None:
+        with self.assertRaises(ValidationError):
+            InsightsRequest.model_validate({"jobTitle": "Developer", "jdText": "Private job description"})
+
+    def test_ai_request_limits_skill_name_lengths(self) -> None:
+        with self.assertRaises(ValidationError):
+            InsightsRequest.model_validate({"gaps": ["x" * 101]})
 
 
 if __name__ == "__main__":

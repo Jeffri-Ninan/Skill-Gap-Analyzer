@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+SkillName = Annotated[str, Field(min_length=1, max_length=100)]
+PlanStep = Annotated[str, Field(min_length=1, max_length=300)]
 
 
 class Credentials(BaseModel):
@@ -135,3 +139,29 @@ class AccountResponse(BaseModel):
     email: str
     name: str | None = None
     provider: str
+
+
+class InsightsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jobTitle: str = Field(default="", max_length=200)
+    score: int | None = Field(default=None, ge=0, le=100)
+    matched: list[SkillName] = Field(default_factory=list, max_length=100)
+    partial: list[SkillName] = Field(default_factory=list, max_length=100)
+    gaps: list[SkillName] = Field(default_factory=list, max_length=100)
+    profile: list[SkillEntry] = Field(default_factory=list, max_length=200)
+
+
+class InsightRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill: str = Field(min_length=1, max_length=100)
+    action: str = Field(min_length=1, max_length=500)
+
+
+class AIInsights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1, max_length=1200)
+    recommendations: list[InsightRecommendation] = Field(default_factory=list, max_length=5)
+    first_week_plan: list[PlanStep] = Field(default_factory=list, max_length=5)

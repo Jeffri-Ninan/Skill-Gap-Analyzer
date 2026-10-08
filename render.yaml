@@ -17,6 +17,8 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
       - key: GITHUB_CLIENT_ID
         sync: false
       - key: GITHUB_CLIENT_SECRET

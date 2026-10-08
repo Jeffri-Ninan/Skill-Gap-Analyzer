@@ -22,7 +22,8 @@ from .database import (
     DuplicateUserError,
     create_database,
 )
-from .models import AccountResponse, AppData, AppDataPayload, Credentials
+from .insights import GeminiServiceError, generate_insights
+from .models import AIInsights, AccountResponse, AppData, AppDataPayload, Credentials, InsightsRequest
 from .security import hash_password, normalize_email, verify_password
 
 load_dotenv()
@@ -119,6 +120,21 @@ async def health() -> dict[str, str]:
         "status": "ok" if is_healthy else "degraded",
         "database": "supabase" if settings.has_supabase else "local",
     }
+
+
+@app.post("/api/insights", response_model=AIInsights)
+async def get_ai_insights(
+    payload: InsightsRequest,
+    request: Request,
+    _: dict = Depends(authenticated_user),
+) -> AIInsights:
+    await require_same_origin(request)
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="AI guidance is not configured. Set GEMINI_API_KEY on the backend.")
+    try:
+        return await generate_insights(payload, settings.gemini_api_key, settings.gemini_model)
+    except GeminiServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @app.get("/")

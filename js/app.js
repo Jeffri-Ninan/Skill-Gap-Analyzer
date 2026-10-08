@@ -7,7 +7,8 @@ import {analyze,projectedScore,radarValues,frequencyAcrossAnalyses} from "./anal
 import {renderRing,renderRadar,renderTrend} from "./radar.js";
 
 const app=document.querySelector("#app");
-let state={profile:[],analyses:[],plan:[],settings:{theme:"dark"}},currentUser=null,currentRoute="",currentAnalysisId=null,whatIf=new Set(),suggestionIndex=-1,authMode="login",legacyState=null;
+let state={profile:[],analyses:[],plan:[],settings:{theme:"dark"}},currentUser=null,currentRoute="",currentAnalysisId=null,whatIf=new Set(),suggestionIndex=-1,authMode="login",legacyState=null,insightLoadingId=null;
+const insightsByAnalysis=new Map(),insightErrors=new Map();
 const $=(selector,root=document)=>root.querySelector(selector);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const pretty=value=>value.replace(/\b\w/g,char=>char.toUpperCase());
@@ -90,6 +91,8 @@ function renderResults() {
   if(result.score===null)return `${pageHead("Your results","No recognizable skills found","We couldn't identify supported skills in this job description. Try adding a requirements section or more technical detail.","<a class=\"button\" href=\"#/analyze\">Edit job description</a>")}<div class="card">${emptyState("No score for this description","No score is shown when no dictionary skills are detected, so an empty result is not mistaken for 0% readiness.","#/analyze","Try another description")}</div>`;
   const score=result.score,projected=projectedScore(result,whatIf);
   const group=(key,label,icon)=>`<section class="card skill-column"><h3>${label}<span class="pill">${result[key].length}</span></h3>${result[key].length?`<ul>${result[key].map(item=>`<li><span class="chip ${key==="matched"?"match":key==="partial"?"partial":"gap"}">${icon} ${esc(pretty(item.skill))}</span></li>`).join("")}</ul>`:`<p class="muted">Nothing to show here yet.</p>`}</section>`;
+  const insights=insightsByAnalysis.get(record.id),insightError=insightErrors.get(record.id);
+  const insightCard=`<section class="card section-gap ai-guidance" aria-live="polite"><div class="page-heading"><div><h2>AI career guidance</h2><p class="muted">Get practical recommendations tailored to this role and your current skill profile.</p></div><button class="button primary" data-action="generate-insights"${insightLoadingId===record.id||insights?" disabled":""}>${insightLoadingId===record.id?"Generating…":insights?"Guidance generated":"Generate guidance"}</button></div><p class="hint">This sends the role title and skill summary—not the full job description, email, or account details—to Google Gemini. Google may use free-tier prompts to improve its products.</p>${insightError?`<p class="error" role="alert">${esc(insightError)}</p>`:""}${insights?`<div class="insight-content"><p>${esc(insights.summary)}</p>${insights.recommendations.length?`<h3>Focus skills</h3><ul>${insights.recommendations.map(item=>`<li><strong>${esc(pretty(item.skill))}:</strong> ${esc(item.action)}</li>`).join("")}</ul>`:""}${insights.first_week_plan.length?`<h3>First-week plan</h3><ol>${insights.first_week_plan.map(item=>`<li>${esc(item)}</li>`).join("")}</ol>`:""}</div>`:""}</section>`;
   const gapCards=result.gaps.length?result.gaps.map(item=>`<article class="card gap-card"><header><div><h3>${esc(pretty(item.skill))}</h3><span class="pill">${esc(item.category)}</span> <span class="muted">${item.weight.toFixed(1)} weight · ${item.learningHours}h estimated</span></div><button class="button small" data-add-plan="${esc(item.skill)}">${state.plan.some(plan=>plan.skill===item.skill)?"In plan":"Add to plan"}</button></header><p>${item.relatedOwned.length?`Related skills you have: ${item.relatedOwned.map(esc).join(", ")}`:"Build foundational knowledge before tackling this skill."}</p><ul>${item.resources.map(resource=>`<li>${esc(resource)}</li>`).join("")}</ul></article>`).join(""):`<div class="card">${emptyState("No missing skills","You match every detected skill at the requested proficiency and experience level.")}</div>`;
   const chartValues=radarValues(result,record.profileSnapshot??state.profile),table=`<table class="chart-table"><caption>Required skill weight and your average level by category</caption><thead><tr><th>Category</th><th>Required (0–5)</th><th>Your level (0–5)</th></tr></thead><tbody>${chartValues.map(value=>`<tr><td>${esc(value.category)}</td><td>${value.required.toFixed(1)}</td><td>${value.level.toFixed(1)}</td></tr>`).join("")}</tbody></table>`;
   return `${pageHead("Your results",esc(record.jobTitle||"Role readiness"),`${esc(record.company||"Job description analysis")} · ${new Date(record.date).toLocaleDateString()}`,"<a class=\"button\" href=\"#/analyze\">Analyze another role</a>")}
@@ -97,6 +100,7 @@ function renderResults() {
     <div class="viz-grid section-gap"><section class="card radar-wrap"><h2>Skill profile</h2><div id="radar-chart"></div>${table}<div class="legend"><span><i></i>Required by role</span><span><i class="legend-you"></i>Your level</span></div></section>
     <section class="card"><h2>What if you learned these?</h2><p class="muted">Select the missing skills you plan to learn and see an estimated score change.</p>${result.gaps.length?`<div class="skill-list">${result.gaps.map(item=>`<label class="comparison-select"><input type="checkbox" data-whatif="${esc(item.skill)}"${whatIf.has(item.skill)?" checked":""}> ${esc(pretty(item.skill))}</label>`).join("")}</div>`:`<p class="muted">No gaps to project.</p>`}<p class="section-gap"><span class="muted">Projected score</span><br><strong class="score-change">${score}% → ${projected}%</strong></p></section></div>
     <section class="section-gap"><h2>Skills in the description</h2><div class="results-columns">${group("matched","Matched","✓")}${group("partial","Partial","~")}${group("gaps","Missing","✗")}</div></section>
+    ${insightCard}
     <section class="section-gap"><div><div class="eyebrow">Prioritized next steps</div><h2>Close your highest-impact gaps</h2><p class="muted">Priority rewards skills related to ones you already have, weighted by estimated learning time.</p></div>${gapCards}</section>
     <section class="card section-gap"><h2>Job description highlights</h2><div class="legend"><span>✓ Matched</span><span>~ Partial</span><span>✗ Gap</span></div><p class="highlight-text section-gap">${highlightedJD(record,result)}</p></section>
     <p class="notice section-gap">Results are estimates based on keyword matching.</p>`;
@@ -188,6 +192,29 @@ async function handleClick(event) {
   if(target.dataset.template){const title=target.dataset.template;if(state.profile.length&&!confirm("Replace your current profile with this role template?"))return;state.profile=ROLE_TEMPLATES[title].map(([skill,level,years])=>({skill,level,years}));if(await persist(`${title} profile loaded.`))render("profile");return;}
   if(target.dataset.sample!==undefined){loadSample(Number(target.dataset.sample));return;}
   if(target.dataset.action==="analyze"){await analyzeDraft();return;}
+  if(target.dataset.action==="generate-insights"){
+    const record=selectedAnalysis();
+    if(!record)return;
+    const result=getAnalysisResult(record);
+    insightLoadingId=record.id;insightErrors.delete(record.id);render("results");
+    try {
+      const insights=await apiRequest("/insights",{method:"POST",body:JSON.stringify({
+        jobTitle:record.jobTitle??"",
+        score:result.score,
+        matched:result.matched.map(item=>item.skill),
+        partial:result.partial.map(item=>item.skill),
+        gaps:result.gaps.map(item=>item.skill),
+        profile:record.profileSnapshot??state.profile
+      })});
+      insightsByAnalysis.set(record.id,insights);
+    } catch(error) {
+      insightErrors.set(record.id,error instanceof Error?error.message:"AI guidance could not be generated.");
+    } finally {
+      insightLoadingId=null;
+      if(currentRoute==="results")render("results");
+    }
+    return;
+  }
   if(target.dataset.action==="export"){exportState(state);return;}
   if(target.dataset.action==="import"){const picker=document.createElement("input");picker.type="file";picker.accept="application/json,.json";picker.addEventListener("change",async()=>{const file=picker.files?.[0];if(!file)return;try{const imported=parseImport(await file.text());const previous=state;state=imported;if(await persist("Data imported successfully.")){currentAnalysisId=null;legacyState=null;render(currentRoute);}else{state=previous;}}catch(error){notify(error instanceof Error?error.message:"Unable to import this file.");}});picker.click();return;}
   if(target.dataset.action==="migrate-legacy"){if(!legacyState)return;if(!confirm("Copy the data from this browser into your signed-in account? This replaces the current account data."))return;const previous=state;state=legacyState;if(await persist("Previous browser data imported into your account.")){legacyState=null;try{localStorage.removeItem("skill-gap-analyzer:v1");}catch(error){console.warn("The old browser copy could not be removed.",error);}render("profile");}else state=previous;return;}
